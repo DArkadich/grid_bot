@@ -128,7 +128,10 @@ def main():
     print("💰 Проверяю баланс...")
     balance = client.get_wallet_balance()
     
-    if "result" in balance:
+    # Отладочная информация
+    print(f"📡 Ответ API: {json.dumps(balance, indent=2)}")
+    
+    if "result" in balance and "list" in balance["result"]:
         account = balance["result"]["list"][0]
         print(f"  Аккаунт: {account['accountType']}")
         
@@ -141,14 +144,18 @@ def main():
                 break
     else:
         print("❌ Не удалось получить баланс")
+        print("Проверьте API ключи и права доступа")
         return
     
     # 2. Проверяем позиции
     print("\n📊 Проверяю позиции...")
     positions = client.get_positions()
     
+    # Отладочная информация для позиций
+    print(f"📡 Ответ API позиций: {json.dumps(positions, indent=2)}")
+    
     active_positions = []
-    if "result" in positions:
+    if "result" in positions and "list" in positions["result"]:
         pos_list = positions["result"]["list"]
         for pos in pos_list:
             size = float(pos.get("size", 0))
@@ -186,7 +193,7 @@ def main():
     print("📊 Финальная проверка баланса...")
     
     final_balance = client.get_wallet_balance()
-    if "result" in final_balance:
+    if "result" in final_balance and "list" in final_balance["result"]:
         account = final_balance["result"]["list"][0]
         for coin in account.get("coin", []):
             if coin["coin"] == "USDT":
