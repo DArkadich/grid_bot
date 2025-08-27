@@ -26,9 +26,9 @@ class GridConfig:
     api_secret: str = os.environ.get("BYBIT_API_SECRET", "")
     
     # Параметры сетки
-    grid_levels: int = 5  # количество уровней
-    grid_spread: float = 0.02  # 2% между уровнями
-    level_amount: float = 5.0  # USDT на уровень
+    grid_levels: int = int(os.environ.get("GRID_LEVELS", "5"))  # количество уровней
+    grid_spread: float = float(os.environ.get("GRID_SPREAD", "0.02"))  # 2% между уровнями
+    level_amount: float = float(os.environ.get("LEVEL_AMOUNT", "5.0"))  # USDT на уровень
     
     # Пары для торговли
     symbols: List[str] = None
