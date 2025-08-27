@@ -22,21 +22,28 @@ from telegram import Bot
 @dataclass
 class GridConfig:
     # API
-    api_key: str = os.environ.get("BYBIT_API_KEY", "")
-    api_secret: str = os.environ.get("BYBIT_API_SECRET", "")
+    api_key: str = os.environ.get("BYBIT_API_KEY")
+    api_secret: str = os.environ.get("BYBIT_API_SECRET")
     
     # Параметры сетки
-    grid_levels: int = int(os.environ.get("GRID_LEVELS", "5"))  # количество уровней
-    grid_spread: float = float(os.environ.get("GRID_SPREAD", "0.02"))  # 2% между уровнями
-    level_amount: float = float(os.environ.get("LEVEL_AMOUNT", "5.0"))  # USDT на уровень
+    grid_levels: int = int(os.environ.get("GRID_LEVELS"))  # количество уровней
+    grid_spread: float = float(os.environ.get("GRID_SPREAD"))  # % между уровнями
+    level_amount: float = float(os.environ.get("LEVEL_AMOUNT"))  # USDT на уровень
     
     # Пары для торговли
     symbols: List[str] = None
     
     def __post_init__(self):
-        if self.symbols is None:
-            # Читаем символы из переменной окружения или используем дефолтные 3 пары
-            env_symbols = os.environ.get("SYMBOLS", "DOGE/USDT,WIF/USDT,JUP/USDT")
+        # Проверяем все обязательные переменные окружения
+        if not self.api_key:
+            raise ValueError("BYBIT_API_KEY не указан в переменных окружения")
+        if not self.api_secret:
+            raise ValueError("BYBIT_API_SECRET не указан в переменных окружения")
+        if not self.symbols:
+            # Читаем символы из переменной окружения
+            env_symbols = os.environ.get("SYMBOLS")
+            if not env_symbols:
+                raise ValueError("SYMBOLS не указан в переменных окружения")
             self.symbols = [s.strip() for s in env_symbols.split(",")]
 
 # ========== КЛИЕНТ БИРЖИ ==========
