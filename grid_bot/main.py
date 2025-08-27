@@ -1,12 +1,17 @@
 """
 Grid Trading Bot - Автоматическая торговля по сетке цен
 
-ПАРЫ (настраиваются через переменную SYMBOLS в .env):
+ПАРЫ (настраиваются через переменную SYMBOLS в .env или по умолчанию):
 - DOGE/USDT (25 USDT, 5 уровней)
 - WIF/USDT (25 USDT, 5 уровней) 
 - JUP/USDT (25 USDT, 5 уровней)
 
-ЦЕЛЬ: 5-15% доходности в день
+ПАРАМЕТРЫ СЕТКИ (по умолчанию):
+- GRID_LEVELS: 5 уровней (было 10)
+- GRID_SPREAD: 0.5% между уровнями (было больше)
+- LEVEL_AMOUNT: 25 USDT на уровень
+
+ЦЕЛЬ: 5-15% доходности в день с более узкой и эффективной сеткой
 """
 
 import ccxt
@@ -26,9 +31,9 @@ class GridConfig:
     api_secret: str = os.environ.get("BYBIT_API_SECRET")
     
     # Параметры сетки
-    grid_levels: int = int(os.environ.get("GRID_LEVELS"))  # количество уровней
-    grid_spread: float = float(os.environ.get("GRID_SPREAD"))  # % между уровнями
-    level_amount: float = float(os.environ.get("LEVEL_AMOUNT"))  # USDT на уровень
+    grid_levels: int = int(os.environ.get("GRID_LEVELS", "5"))  # количество уровней (по умолчанию 5)
+    grid_spread: float = float(os.environ.get("GRID_SPREAD", "0.005"))  # 0.5% между уровнями (по умолчанию 0.5%)
+    level_amount: float = float(os.environ.get("LEVEL_AMOUNT", "25"))  # USDT на уровень (по умолчанию 25)
     
     # Пары для торговли
     symbols: List[str] = None
@@ -40,10 +45,8 @@ class GridConfig:
         if not self.api_secret:
             raise ValueError("BYBIT_API_SECRET не указан в переменных окружения")
         if not self.symbols:
-            # Читаем символы из переменной окружения
-            env_symbols = os.environ.get("SYMBOLS")
-            if not env_symbols:
-                raise ValueError("SYMBOLS не указан в переменных окружения")
+            # Читаем символы из переменной окружения или используем по умолчанию
+            env_symbols = os.environ.get("SYMBOLS", "DOGE/USDT,WIF/USDT,JUP/USDT")
             self.symbols = [s.strip() for s in env_symbols.split(",")]
 
 # ========== КЛИЕНТ БИРЖИ ==========
