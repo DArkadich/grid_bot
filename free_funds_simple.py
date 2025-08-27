@@ -32,12 +32,11 @@ class BybitClient:
         self.api_secret = api_secret
         self.base_url = "https://api.bybit.com"
     
-    def _sign_request(self, params: str, timestamp: str) -> str:
-        """Подписать запрос"""
-        sign_str = timestamp + self.api_key + "5000" + params
+    def _sign_request(self, params: str) -> str:
+        """Подписать запрос для Bybit"""
         return hmac.new(
             self.api_secret.encode('utf-8'),
-            sign_str.encode('utf-8'),
+            params.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
     
@@ -56,20 +55,29 @@ class BybitClient:
                 "recv_window": "5000"
             })
             
-            # Сортируем параметры для подписи
+            # Сортируем параметры для подписи (важно для Bybit!)
             sorted_params = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
-            signature = self._sign_request(sorted_params, timestamp)
+            
+            # Подписываем строку параметров
+            signature = self._sign_request(sorted_params)
             params["sign"] = signature
             
             url = f"{self.base_url}{endpoint}"
             
             if method == "GET":
+                # Для GET запроса добавляем параметры в URL
                 url += "?" + "&".join([f"{k}={v}" for k, v in params.items()])
                 request = urllib.request.Request(url)
             else:
+                # Для POST запроса отправляем данные в теле
                 data = urllib.parse.urlencode(params).encode('utf-8')
                 request = urllib.request.Request(url, data=data, method=method)
                 request.add_header('Content-Type', 'application/x-www-form-urlencoded')
+            
+            # Отладочная информация
+            print(f"🔍 URL: {url}")
+            print(f"🔍 Параметры: {sorted_params}")
+            print(f"🔍 Подпись: {signature}")
             
             with urllib.request.urlopen(request) as response:
                 result = json.loads(response.read().decode())
