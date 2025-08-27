@@ -124,6 +124,16 @@ class BybitClient:
         }
         return self._make_request(endpoint, params, "POST")
 
+# ========== УТИЛИТЫ ==========
+def safe_float(value, default=0.0):
+    """Безопасное преобразование в float"""
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
 # ========== ОСНОВНАЯ ЛОГИКА ==========
 def main():
     print("🚀 Упрощённый скрипт освобождения средств от L1 Bot")
@@ -143,13 +153,42 @@ def main():
         account = balance["result"]["list"][0]
         print(f"  Аккаунт: {account['accountType']}")
         
+        # Показываем все доступные валюты
+        print(f"\n📊 Доступные валюты:")
+        usdt_found = False
+        
         for coin in account.get("coin", []):
-            if coin["coin"] == "USDT":
-                total = float(coin.get("walletBalance", 0))
-                free = float(coin.get("availableToWithdraw", 0))
-                print(f"  USDT Total: {total:.2f}")
-                print(f"  USDT Free: {free:.2f}")
-                break
+            currency = coin.get("coin", "Unknown")
+            total = safe_float(coin.get("walletBalance", 0))
+            free = safe_float(coin.get("availableToWithdraw", 0))
+            equity = safe_float(coin.get("equity", 0))
+            
+            print(f"  {currency}:")
+            print(f"    Total: {total:.8f}")
+            print(f"    Free: {free:.8f}")
+            print(f"    Equity: {equity:.8f}")
+            
+            if currency == "USDT":
+                usdt_found = True
+                print(f"    ✅ USDT найден!")
+        
+        if not usdt_found:
+            print("\n⚠️ USDT не найден в аккаунте!")
+            print("Возможно, все средства в других валютах")
+            
+            # Показываем общий equity в USD
+            total_equity_usd = 0
+            for coin in account.get("coin", []):
+                usd_value = safe_float(coin.get("usdValue", 0))
+                total_equity_usd += usd_value
+            
+            print(f"\n💵 Общий equity в USD: {total_equity_usd:.4f}")
+            
+            if total_equity_usd > 0:
+                print("💡 Рекомендация: продать часть активов за USDT")
+            else:
+                print("❌ Нет средств для торговли")
+                return
     else:
         print("❌ Не удалось получить баланс")
         print("Проверьте API ключи и права доступа")
@@ -166,13 +205,13 @@ def main():
     if "result" in positions and "list" in positions["result"]:
         pos_list = positions["result"]["list"]
         for pos in pos_list:
-            size = float(pos.get("size", 0))
+            size = safe_float(pos.get("size", 0))
             if size > 0:
                 active_positions.append(pos)
                 symbol = pos.get("symbol", "Unknown")
                 side = pos.get("side", "Unknown")
-                avg_price = float(pos.get("avgPrice", 0))
-                pnl = float(pos.get("unrealisedPnl", 0))
+                avg_price = safe_float(pos.get("avgPrice", 0))
+                pnl = safe_float(pos.get("unrealisedPnl", 0))
                 print(f"  {symbol} {side} {size:.6f} @ {avg_price:.4f} PnL: {pnl:.4f}")
     
     if not active_positions:
@@ -203,18 +242,31 @@ def main():
     final_balance = client.get_wallet_balance()
     if "result" in final_balance and "list" in final_balance["result"]:
         account = final_balance["result"]["list"][0]
+        
+        # Ищем USDT
+        usdt_free = 0
+        total_equity_usd = 0
+        
         for coin in account.get("coin", []):
-            if coin["coin"] == "USDT":
-                free_usdt = float(coin.get("availableToWithdraw", 0))
-                print(f"  USDT Free: {free_usdt:.2f}")
-                
-                if free_usdt > 10:
-                    print(f"✅ Успешно освобождено {free_usdt:.2f} USDT!")
-                    print("Теперь можно запускать Grid Trading Bot")
-                else:
-                    print("⚠️ USDT всё ещё недостаточно для Grid Bot")
-                    print("Возможно, нужно пополнить аккаунт")
-                break
+            currency = coin.get("coin", "")
+            if currency == "USDT":
+                usdt_free = safe_float(coin.get("availableToWithdraw", 0))
+                print(f"  USDT Free: {usdt_free:.2f}")
+            else:
+                usd_value = safe_float(coin.get("usdValue", 0))
+                total_equity_usd += usd_value
+        
+        print(f"  Общий equity в USD: {total_equity_usd:.4f}")
+        
+        if usdt_free > 10:
+            print(f"✅ Успешно освобождено {usdt_free:.2f} USDT!")
+            print("Теперь можно запускать Grid Trading Bot")
+        elif total_equity_usd > 10:
+            print(f"⚠️ USDT: {usdt_free:.2f}, но общий equity: {total_equity_usd:.2f} USD")
+            print("Нужно продать часть активов за USDT")
+        else:
+            print("⚠️ Недостаточно средств для Grid Bot")
+            print("Возможно, нужно пополнить аккаунт")
     else:
         print("❌ Не удалось получить финальный баланс")
 
