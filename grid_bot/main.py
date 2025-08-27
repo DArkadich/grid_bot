@@ -1,12 +1,10 @@
 """
 Grid Trading Bot - Автоматическая торговля по сетке цен
 
-ПАРЫ:
+ПАРЫ (настраиваются через переменную SYMBOLS в .env):
 - DOGE/USDT (25 USDT, 5 уровней)
 - WIF/USDT (25 USDT, 5 уровней) 
 - JUP/USDT (25 USDT, 5 уровней)
-- OP/USDT (20 USDT, 4 уровня)
-- ENA/USDT (20 USDT, 4 уровня)
 
 ЦЕЛЬ: 5-15% доходности в день
 """
@@ -37,7 +35,9 @@ class GridConfig:
     
     def __post_init__(self):
         if self.symbols is None:
-            self.symbols = ["DOGE/USDT", "WIF/USDT", "JUP/USDT", "OP/USDT", "ENA/USDT"]
+            # Читаем символы из переменной окружения или используем дефолтные 3 пары
+            env_symbols = os.environ.get("SYMBOLS", "DOGE/USDT,WIF/USDT,JUP/USDT")
+            self.symbols = [s.strip() for s in env_symbols.split(",")]
 
 # ========== КЛИЕНТ БИРЖИ ==========
 class BybitClient:
