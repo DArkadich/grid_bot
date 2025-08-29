@@ -151,6 +151,48 @@ class GridManager:
         except Exception as e:
             print(f"Ошибка инициализации БД: {e}")
     
+    def load_existing_grids(self):
+        """Загрузить существующие сетки из базы данных"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Получаем все символы с существующими сетками
+            cursor.execute("SELECT DISTINCT symbol FROM grids")
+            symbols = [row[0] for row in cursor.fetchall()]
+            
+            for symbol in symbols:
+                # Загружаем все уровни для символа
+                cursor.execute("""
+                    SELECT level, side, amount, price, order_id, status 
+                    FROM grids 
+                    WHERE symbol = ? 
+                    ORDER BY level, side
+                """, (symbol,))
+                
+                grid = []
+                for row in cursor.fetchall():
+                    level, side, amount, price, order_id, status = row
+                    grid.append({
+                        "level": level,
+                        "side": side,
+                        "amount": amount,
+                        "price": price,
+                        "order_id": order_id,
+                        "status": status
+                    })
+                
+                if grid:
+                    self.grids[symbol] = grid
+                    print(f"📋 Загружена существующая сетка для {symbol}: {len(grid)} уровней")
+            
+            conn.close()
+            return len(symbols) > 0
+            
+        except Exception as e:
+            print(f"Ошибка загрузки существующих сеток: {e}")
+            return False
+    
     def create_grid(self, symbol: str, current_price: float):
         """Создать сетку для пары"""
         try:
@@ -232,6 +274,56 @@ class GridManager:
                     
         except Exception as e:
             print(f"Ошибка размещения ордеров сетки {symbol}: {e}")
+    
+    def sync_orders_with_exchange(self, symbol: str):
+        """Синхронизировать статус ордеров с биржей"""
+        try:
+            if symbol not in self.grids:
+                return
+            
+            grid = self.grids[symbol]
+            for level in grid:
+                if level["order_id"] and level["status"] == "active":
+                    try:
+                        # Получаем статус ордера с биржи
+                        order = self.client.exchange.fetch_order(level["order_id"], symbol)
+                        if order:
+                            # Обновляем статус в БД и памяти
+                            new_status = order["status"]
+                            if new_status != level["status"]:
+                                level["status"] = new_status
+                                self.update_order_status_in_db(symbol, level["level"], level["side"], new_status)
+                                
+                                if new_status == "filled":
+                                    print(f"✅ Ордер исполнен: {symbol} {level['side']} {level['amount']} @ {level['price']}")
+                                elif new_status == "canceled":
+                                    print(f"❌ Ордер отменён: {symbol} {level['side']} {level['amount']} @ {level['price']}")
+                    
+                    except Exception as e:
+                        # Если ордер не найден, возможно он исполнен или отменён
+                        print(f"⚠️ Не удалось получить статус ордера {level['order_id']}: {e}")
+                        # Можно добавить логику для проверки позиций
+                        
+        except Exception as e:
+            print(f"Ошибка синхронизации ордеров {symbol}: {e}")
+    
+    def update_order_status_in_db(self, symbol: str, level: int, side: str, status: str):
+        """Обновить статус ордера в базе данных"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE grids 
+                SET status = ? 
+                WHERE symbol = ? AND level = ? AND side = ?
+            """, (status, symbol, level, side))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"Ошибка обновления статуса в БД: {e}")
 
 # ========== ОСНОВНОЙ ЦИКЛ ==========
 def main():
@@ -242,37 +334,46 @@ def main():
     client = BybitClient(config)
     grid_manager = GridManager(client, config)
     
-    # Создание сеток для всех пар
-    for symbol in config.symbols:
-        try:
-            ticker = client.get_ticker(symbol)
-            if ticker and "last" in ticker:
-                current_price = ticker["last"]
-                grid_manager.create_grid(symbol, current_price)
-                grid_manager.place_grid_orders(symbol)
-                print(f"Сетка активирована для {symbol}")
-            else:
-                print(f"Не удалось получить цену для {symbol}")
-        except Exception as e:
-            print(f"Ошибка инициализации {symbol}: {e}")
+    # Попытка загрузить существующие сетки
+    has_existing_grids = grid_manager.load_existing_grids()
     
-    print("✅ Все сетки созданы и активированы!")
+    if has_existing_grids:
+        print("📋 Найдены существующие сетки. Продолжаем мониторинг...")
+        # Синхронизируем статус с биржей
+        for symbol in grid_manager.grids.keys():
+            grid_manager.sync_orders_with_exchange(symbol)
+    else:
+        print("📝 Существующие сетки не найдены. Создаём новые...")
+        # Создание сеток для всех пар
+        for symbol in config.symbols:
+            try:
+                ticker = client.get_ticker(symbol)
+                if ticker and "last" in ticker:
+                    current_price = ticker["last"]
+                    grid_manager.create_grid(symbol, current_price)
+                    grid_manager.place_grid_orders(symbol)
+                    print(f"Сетка активирована для {symbol}")
+                else:
+                    print(f"Не удалось получить цену для {symbol}")
+            except Exception as e:
+                print(f"Ошибка инициализации {symbol}: {e}")
+    
+    print("✅ Все сетки готовы к работе!")
     print("📊 Мониторинг активен...")
     
     # БЕСКОНЕЧНЫЙ ЦИКЛ МОНИТОРИНГА
     while True:
         try:
             # Мониторинг активных сеток
-            for symbol in config.symbols:
-                if symbol in grid_manager.grids:
-                    # Проверяем статус ордеров
-                    ticker = client.get_ticker(symbol)
-                    if ticker and "last" in ticker:
-                        current_price = ticker["last"]
-                        print(f"💰 {symbol}: текущая цена {current_price}")
-                        
-                        # Здесь можно добавить логику мониторинга ордеров
-                        # и управления сеткой
+            for symbol in grid_manager.grids.keys():
+                # Проверяем статус ордеров
+                ticker = client.get_ticker(symbol)
+                if ticker and "last" in ticker:
+                    current_price = ticker["last"]
+                    print(f"💰 {symbol}: текущая цена {current_price}")
+                    
+                    # Синхронизируем статус ордеров с биржей
+                    grid_manager.sync_orders_with_exchange(symbol)
             
             # Пауза между проверками (1 минута)
             time.sleep(60)
