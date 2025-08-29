@@ -1,5 +1,5 @@
 """
-Grid Trading Bot - Автоматическая торговля по сетке цен
+Grid Trading Bot - Автоматическая торговля по логарифмической сетке цен
 
 ВСЕ ПАРАМЕТРЫ НАСТРАИВАЮТСЯ ЧЕРЕЗ .env ФАЙЛ:
 
@@ -8,12 +8,18 @@ Grid Trading Bot - Автоматическая торговля по сетке
 - BYBIT_API_SECRET - API секрет Bybit
 - SYMBOLS - торговые пары через запятую (например: DOGE/USDT,WIF/USDT,JUP/USDT)
 
-ПАРАМЕТРЫ СЕТКИ:
-- GRID_LEVELS - количество уровней сетки (рекомендуется: 5)
-- GRID_SPREAD - спред между уровнями в % (рекомендуется: 0.005 = 0.5%)
-- LEVEL_AMOUNT - USDT на уровень (рекомендуется: 25)
+ПАРАМЕТРЫ ЛОГАРИФМИЧЕСКОЙ СЕТКИ:
+- GRID_LEVELS - количество уровней сетки (рекомендуется: 5-10)
+- GRID_SPREAD - базовый спред между уровнями в % (рекомендуется: 0.001 = 0.1%)
+- LEVEL_AMOUNT - USDT на уровень (рекомендуется: 1-5)
+- LOG_MULTIPLIER - множитель для логарифмического распределения (рекомендуется: 1.5)
 
-ЦЕЛЬ: 5-15% доходности в день с узкой и эффективной сеткой
+ЛОГАРИФМИЧЕСКАЯ СЕТКА:
+- Близко к цене: плотная сетка для быстрых сделок
+- Далеко от цены: редкая сетка для защиты от экстремальных движений
+- Эффективное использование капитала без замораживания на маловероятных событиях
+
+ЦЕЛЬ: 5-15% доходности в день с умной логарифмической сеткой
 """
 
 import ccxt
@@ -36,6 +42,9 @@ class GridConfig:
     grid_levels: int = int(os.environ.get("GRID_LEVELS"))  # количество уровней
     grid_spread: float = float(os.environ.get("GRID_SPREAD"))  # % между уровнями
     level_amount: float = float(os.environ.get("LEVEL_AMOUNT"))  # USDT на уровень
+    
+    # Логарифмическая сетка
+    log_multiplier: float = float(os.environ.get("LOG_MULTIPLIER", "1.5"))  # множитель для логарифмического распределения
     
     # Пары для торговли
     symbols: List[str] = None
@@ -219,14 +228,25 @@ class GridManager:
             return False
     
     def create_grid(self, symbol: str, current_price: float):
-        """Создать сетку для пары"""
+        """Создать логарифмическую сетку для пары"""
         try:
             grid = []
             base_amount = self.config.level_amount / current_price
             
-            # Создаём уровни покупки ниже текущей цены
+            # Логарифмический множитель для расстояния между уровнями
+            # Можно настроить в .env файле как LOG_MULTIPLIER
+            log_multiplier = getattr(self.config, 'log_multiplier', 1.5)
+            
+            print(f"🔧 Создание логарифмической сетки для {symbol}")
+            print(f"   Текущая цена: {current_price}")
+            print(f"   Базовый спред: {self.config.grid_spread * 100:.2f}%")
+            print(f"   Логарифмический множитель: {log_multiplier}")
+            
+            # Создаём уровни покупки ниже текущей цены (логарифмически)
             for i in range(self.config.grid_levels):
-                buy_price = current_price * (1 - self.config.grid_spread * (i + 1))
+                # Логарифмическое расстояние: базовый спред * (множитель ^ уровень)
+                distance = self.config.grid_spread * (log_multiplier ** i)
+                buy_price = current_price * (1 - distance)
                 buy_price = round(buy_price, 6)
                 
                 grid.append({
@@ -236,10 +256,14 @@ class GridManager:
                     "amount": base_amount,
                     "status": "pending"
                 })
+                
+                print(f"   📉 Buy уровень {i}: {buy_price} (-{distance * 100:.2f}%)")
             
-            # Создаём уровни продажи выше текущей цены
+            # Создаём уровни продажи выше текущей цены (логарифмически)
             for i in range(self.config.grid_levels):
-                sell_price = current_price * (1 + self.config.grid_spread * (i + 1))
+                # Логарифмическое расстояние: базовый спред * (множитель ^ уровень)
+                distance = self.config.grid_spread * (log_multiplier ** i)
+                sell_price = current_price * (1 + distance)
                 sell_price = round(sell_price, 6)
                 
                 grid.append({
@@ -249,10 +273,12 @@ class GridManager:
                     "amount": base_amount,
                     "status": "pending"
                 })
+                
+                print(f"   📈 Sell уровень {i}: {sell_price} (+{distance * 100:.2f}%)")
             
             self.grids[symbol] = grid
             self.save_grid_to_db(symbol, grid)
-            print(f"Сетка создана для {symbol}: {len(grid)} уровней")
+            print(f"✅ Логарифмическая сетка создана для {symbol}: {len(grid)} уровней")
             
         except Exception as e:
             print(f"Ошибка создания сетки {symbol}: {e}")
@@ -391,11 +417,13 @@ class GridManager:
                     current_price = ticker["last"]
                     
                     for level in orders_to_recreate:
-                        # Пересчитываем цену для уровня
+                        # Пересчитываем цену для уровня (логарифмически)
+                        distance = self.config.grid_spread * (self.config.log_multiplier ** level["level"])
+                        
                         if level["side"] == "buy":
-                            new_price = current_price * (1 - self.config.grid_spread * (level["level"] + 1))
+                            new_price = current_price * (1 - distance)
                         else:  # sell
-                            new_price = current_price * (1 + self.config.grid_spread * (level["level"] + 1))
+                            new_price = current_price * (1 + distance)
                         
                         new_price = round(new_price, 6)
                         level["price"] = new_price
@@ -404,6 +432,8 @@ class GridManager:
                         
                         # Обновляем в БД
                         self.update_order_in_db(symbol, level["level"], level["side"], new_price, None, "pending")
+                        
+                        print(f"   📝 {level['side']} уровень {level['level']}: цена обновлена до {new_price} (±{distance * 100:.2f}%)")
                     
                     # Размещаем новые ордера (с проверкой баланса)
                     self.place_grid_orders(symbol)
