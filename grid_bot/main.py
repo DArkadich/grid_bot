@@ -324,6 +324,74 @@ class GridManager:
             
         except Exception as e:
             print(f"Ошибка обновления статуса в БД: {e}")
+    
+    def check_and_recreate_orders(self, symbol: str):
+        """Проверить и пересоздать недостающие ордера"""
+        try:
+            if symbol not in self.grids:
+                return
+            
+            grid = self.grids[symbol]
+            orders_to_recreate = []
+            
+            for level in grid:
+                # Проверяем, нужен ли ордер
+                if level["status"] in ["filled", "canceled", "pending"] or not level["order_id"]:
+                    orders_to_recreate.append(level)
+            
+            if orders_to_recreate:
+                print(f"🔄 {symbol}: нужно пересоздать {len(orders_to_recreate)} ордеров")
+                
+                for level in orders_to_recreate:
+                    try:
+                        # Получаем текущую цену для расчёта нового уровня
+                        ticker = self.client.get_ticker(symbol)
+                        if ticker and "last" in ticker:
+                            current_price = ticker["last"]
+                            
+                            # Пересчитываем цену для уровня
+                            if level["side"] == "buy":
+                                new_price = current_price * (1 - self.config.grid_spread * (level["level"] + 1))
+                            else:  # sell
+                                new_price = current_price * (1 + self.config.grid_spread * (level["level"] + 1))
+                            
+                            new_price = round(new_price, 6)
+                            level["price"] = new_price
+                            level["status"] = "pending"
+                            level["order_id"] = None
+                            
+                            # Обновляем в БД
+                            self.update_order_in_db(symbol, level["level"], level["side"], new_price, None, "pending")
+                            
+                            print(f"📝 {symbol} {level['side']} уровень {level['level']}: цена обновлена до {new_price}")
+                    
+                    except Exception as e:
+                        print(f"Ошибка обновления уровня {level['level']} {level['side']}: {e}")
+                
+                # Размещаем новые ордера
+                self.place_grid_orders(symbol)
+                print(f"✅ {symbol}: новые ордера размещены")
+            
+        except Exception as e:
+            print(f"Ошибка проверки и пересоздания ордеров {symbol}: {e}")
+    
+    def update_order_in_db(self, symbol: str, level: int, side: str, price: float, order_id: str, status: str):
+        """Обновить ордер в базе данных"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE grids 
+                SET price = ?, order_id = ?, status = ? 
+                WHERE symbol = ? AND level = ? AND side = ?
+            """, (price, order_id, status, symbol, level, side))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"Ошибка обновления ордера в БД: {e}")
 
 # ========== ОСНОВНОЙ ЦИКЛ ==========
 def main():
@@ -338,10 +406,12 @@ def main():
     has_existing_grids = grid_manager.load_existing_grids()
     
     if has_existing_grids:
-        print("📋 Найдены существующие сетки. Продолжаем мониторинг...")
+        print("📋 Найдены существующие сетки. Проверяем и пересоздаём недостающие ордера...")
         # Синхронизируем статус с биржей
         for symbol in grid_manager.grids.keys():
             grid_manager.sync_orders_with_exchange(symbol)
+            # Проверяем и пересоздаём недостающие ордера
+            grid_manager.check_and_recreate_orders(symbol)
     else:
         print("📝 Существующие сетки не найдены. Создаём новые...")
         # Создание сеток для всех пар
@@ -374,6 +444,10 @@ def main():
                     
                     # Синхронизируем статус ордеров с биржей
                     grid_manager.sync_orders_with_exchange(symbol)
+                    
+                    # Каждые 5 минут проверяем и пересоздаём недостающие ордера
+                    if int(time.time()) % 300 < 60:  # Каждые 5 минут
+                        grid_manager.check_and_recreate_orders(symbol)
             
             # Пауза между проверками (1 минута)
             time.sleep(60)
