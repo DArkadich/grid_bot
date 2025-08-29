@@ -97,14 +97,46 @@ class BybitClient:
             return {}
     
     def get_balance(self) -> float:
-        """Получить доступный баланс USDT"""
+        """Получить доступный баланс USDT с отладкой"""
         try:
             balance = self.exchange.fetch_balance()
-            if 'USDT' in balance and 'free' in balance['USDT']:
-                return float(balance['USDT']['free'])
+            print(f"🔍 Отладка баланса: получено {len(balance)} ключей")
+            print(f"🔍 Основные ключи: {list(balance.keys())[:10]}")
+            
+            if 'USDT' in balance:
+                usdt_balance = balance['USDT']
+                print(f"💰 USDT баланс найден: {usdt_balance}")
+                print(f"🔍 Ключи USDT: {list(usdt_balance.keys())}")
+                
+                if 'free' in usdt_balance:
+                    free_balance = float(usdt_balance['free'])
+                    print(f"✅ Свободный USDT: {free_balance}")
+                    return free_balance
+                elif 'available' in usdt_balance:
+                    available_balance = float(usdt_balance['available'])
+                    print(f"✅ Доступный USDT (available): {available_balance}")
+                    return available_balance
+                elif 'total' in usdt_balance:
+                    total_balance = float(usdt_balance['total'])
+                    print(f"⚠️ Общий USDT (total): {total_balance}")
+                    return total_balance
+                else:
+                    print(f"❌ Ключи 'free', 'available', 'total' не найдены в USDT балансе")
+                    print(f"🔍 Полный USDT баланс: {usdt_balance}")
+            else:
+                print(f"❌ USDT не найден в балансе")
+                print(f"🔍 Доступные валюты: {list(balance.keys())[:15]}")
+                
+                # Попробуем найти USDT в других форматах
+                for key in balance.keys():
+                    if 'USDT' in str(key) or 'usdt' in str(key).lower():
+                        print(f"🔍 Найден похожий ключ: {key} = {balance[key]}")
+            
             return 0.0
         except Exception as e:
-            print(f"Ошибка получения баланса: {e}")
+            print(f"❌ Ошибка получения баланса: {e}")
+            import traceback
+            traceback.print_exc()
             return 0.0
     
     def place_order(self, symbol: str, side: str, amount: float, price: float) -> Dict:
