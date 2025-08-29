@@ -87,6 +87,17 @@ class BybitClient:
             print(f"Ошибка получения тикера {symbol}: {e}")
             return {}
     
+    def get_balance(self) -> float:
+        """Получить доступный баланс USDT"""
+        try:
+            balance = self.exchange.fetch_balance()
+            if 'USDT' in balance and 'free' in balance['USDT']:
+                return float(balance['USDT']['free'])
+            return 0.0
+        except Exception as e:
+            print(f"Ошибка получения баланса: {e}")
+            return 0.0
+    
     def place_order(self, symbol: str, side: str, amount: float, price: float) -> Dict:
         """Разместить лимитный ордер"""
         try:
@@ -150,6 +161,20 @@ class GridManager:
             print("База данных инициализирована")
         except Exception as e:
             print(f"Ошибка инициализации БД: {e}")
+    
+    def check_available_balance(self, required_amount: float) -> bool:
+        """Проверить, достаточно ли средств для создания ордера"""
+        try:
+            available_balance = self.client.get_balance()
+            if available_balance >= required_amount:
+                print(f"💰 Доступно USDT: {available_balance:.2f}, нужно: {required_amount:.2f}")
+                return True
+            else:
+                print(f"❌ Недостаточно средств: доступно {available_balance:.2f} USDT, нужно {required_amount:.2f} USDT")
+                return False
+        except Exception as e:
+            print(f"Ошибка проверки баланса: {e}")
+            return False
     
     def load_existing_grids(self):
         """Загрузить существующие сетки из базы данных"""
@@ -250,27 +275,41 @@ class GridManager:
             print(f"Ошибка сохранения сетки в БД: {e}")
     
     def place_grid_orders(self, symbol: str):
-        """Разместить ордера сетки"""
+        """Разместить ордера сетки с проверкой баланса"""
         try:
             if symbol not in self.grids:
                 return
             
             grid = self.grids[symbol]
+            placed_orders = 0
+            skipped_orders = 0
+            
             for level in grid:
                 if level["status"] == "pending":
-                    order = self.client.place_order(
-                        symbol=symbol,
-                        side=level["side"],
-                        amount=level["amount"],
-                        price=level["price"]
-                    )
+                    # Рассчитываем требуемую сумму для ордера
+                    required_amount = level["amount"] * level["price"]
                     
-                    if order and "id" in order:
-                        level["order_id"] = order["id"]
-                        level["status"] = "active"
-                        print(f"Ордер размещён: {symbol} {level['side']} {level['amount']} @ {level['price']}")
-                    
-                    time.sleep(0.1)  # Задержка между ордерами
+                    # Проверяем, достаточно ли средств
+                    if self.check_available_balance(required_amount):
+                        order = self.client.place_order(
+                            symbol=symbol,
+                            side=level["side"],
+                            amount=level["amount"],
+                            price=level["price"]
+                        )
+                        
+                        if order and "id" in order:
+                            level["order_id"] = order["id"]
+                            level["status"] = "active"
+                            placed_orders += 1
+                            print(f"✅ Ордер размещён: {symbol} {level['side']} {level['amount']:.2f} @ {level['price']}")
+                        
+                        time.sleep(0.1)  # Задержка между ордерами
+                    else:
+                        skipped_orders += 1
+                        print(f"⏭️ Ордер пропущен: {symbol} {level['side']} {level['amount']:.2f} @ {level['price']} (недостаточно средств)")
+            
+            print(f"📊 {symbol}: размещено {placed_orders} ордеров, пропущено {skipped_orders}")
                     
         except Exception as e:
             print(f"Ошибка размещения ордеров сетки {symbol}: {e}")
@@ -326,51 +365,52 @@ class GridManager:
             print(f"Ошибка обновления статуса в БД: {e}")
     
     def check_and_recreate_orders(self, symbol: str):
-        """Проверить и пересоздать недостающие ордера"""
+        """Проверить и пересоздать недостающие ордера с учётом баланса"""
         try:
             if symbol not in self.grids:
                 return
+            
+            # Показываем текущий баланс
+            current_balance = self.client.get_balance()
+            print(f"💰 Текущий баланс: {current_balance:.2f} USDT")
             
             grid = self.grids[symbol]
             orders_to_recreate = []
             
             for level in grid:
-                # Проверяем, нужен ли ордер
-                if level["status"] in ["filled", "canceled", "pending"] or not level["order_id"]:
+                # Проверяем, нужен ли ордер (только если он не активен)
+                if level["status"] in ["filled", "canceled", "pending"] or not level.get("order_id"):
                     orders_to_recreate.append(level)
             
             if orders_to_recreate:
-                print(f"🔄 {symbol}: нужно пересоздать {len(orders_to_recreate)} ордеров")
+                print(f"🔄 {symbol}: найдено {len(orders_to_recreate)} ордеров для пересоздания")
                 
-                for level in orders_to_recreate:
-                    try:
-                        # Получаем текущую цену для расчёта нового уровня
-                        ticker = self.client.get_ticker(symbol)
-                        if ticker and "last" in ticker:
-                            current_price = ticker["last"]
-                            
-                            # Пересчитываем цену для уровня
-                            if level["side"] == "buy":
-                                new_price = current_price * (1 - self.config.grid_spread * (level["level"] + 1))
-                            else:  # sell
-                                new_price = current_price * (1 + self.config.grid_spread * (level["level"] + 1))
-                            
-                            new_price = round(new_price, 6)
-                            level["price"] = new_price
-                            level["status"] = "pending"
-                            level["order_id"] = None
-                            
-                            # Обновляем в БД
-                            self.update_order_in_db(symbol, level["level"], level["side"], new_price, None, "pending")
-                            
-                            print(f"📝 {symbol} {level['side']} уровень {level['level']}: цена обновлена до {new_price}")
+                # Пересчитываем цены только для неактивных ордеров
+                ticker = self.client.get_ticker(symbol)
+                if ticker and "last" in ticker:
+                    current_price = ticker["last"]
                     
-                    except Exception as e:
-                        print(f"Ошибка обновления уровня {level['level']} {level['side']}: {e}")
-                
-                # Размещаем новые ордера
-                self.place_grid_orders(symbol)
-                print(f"✅ {symbol}: новые ордера размещены")
+                    for level in orders_to_recreate:
+                        # Пересчитываем цену для уровня
+                        if level["side"] == "buy":
+                            new_price = current_price * (1 - self.config.grid_spread * (level["level"] + 1))
+                        else:  # sell
+                            new_price = current_price * (1 + self.config.grid_spread * (level["level"] + 1))
+                        
+                        new_price = round(new_price, 6)
+                        level["price"] = new_price
+                        level["status"] = "pending"
+                        level["order_id"] = None
+                        
+                        # Обновляем в БД
+                        self.update_order_in_db(symbol, level["level"], level["side"], new_price, None, "pending")
+                    
+                    # Размещаем новые ордера (с проверкой баланса)
+                    self.place_grid_orders(symbol)
+                else:
+                    print(f"❌ Не удалось получить текущую цену для {symbol}")
+            else:
+                print(f"✅ {symbol}: все ордера активны, пересоздание не требуется")
             
         except Exception as e:
             print(f"Ошибка проверки и пересоздания ордеров {symbol}: {e}")
