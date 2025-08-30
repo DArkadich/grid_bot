@@ -139,6 +139,29 @@ class BybitClient:
             traceback.print_exc()
             return 0.0
     
+    def get_base_balance(self, currency: str) -> float:
+        """Получить доступный баланс базовой валюты (например DOGE)"""
+        try:
+            balance = self.exchange.fetch_balance()
+            
+            if currency in balance:
+                currency_balance = balance[currency]
+                
+                if 'free' in currency_balance:
+                    free_balance = float(currency_balance['free'])
+                    return free_balance
+                elif 'available' in currency_balance:
+                    available_balance = float(currency_balance['available'])
+                    return available_balance
+                elif 'total' in currency_balance:
+                    total_balance = float(currency_balance['total'])
+                    return total_balance
+            
+            return 0.0
+        except Exception as e:
+            print(f"Ошибка получения баланса {currency}: {e}")
+            return 0.0
+    
     def place_order(self, symbol: str, side: str, amount: float, price: float) -> Dict:
         """Разместить лимитный ордер"""
         try:
@@ -203,16 +226,29 @@ class GridManager:
         except Exception as e:
             print(f"Ошибка инициализации БД: {e}")
     
-    def check_available_balance(self, required_amount: float) -> bool:
+    def check_available_balance(self, symbol: str, side: str, amount: float, price: float) -> bool:
         """Проверить, достаточно ли средств для создания ордера"""
         try:
-            available_balance = self.client.get_balance()
-            if available_balance >= required_amount:
-                print(f"💰 Доступно USDT: {available_balance:.2f}, нужно: {required_amount:.2f}")
-                return True
-            else:
-                print(f"❌ Недостаточно средств: доступно {available_balance:.2f} USDT, нужно {required_amount:.2f} USDT")
-                return False
+            if side == "buy":
+                # Для покупки нужен USDT
+                required_usdt = amount * price
+                available_usdt = self.client.get_balance()
+                if available_usdt >= required_usdt:
+                    print(f"💰 Доступно USDT: {available_usdt:.2f}, нужно: {required_usdt:.2f}")
+                    return True
+                else:
+                    print(f"❌ Недостаточно USDT: доступно {available_usdt:.2f}, нужно {required_usdt:.2f}")
+                    return False
+            else:  # sell
+                # Для продажи нужна базовая валюта (DOGE)
+                base_currency = symbol.split('/')[0]  # DOGE из DOGE/USDT
+                available_base = self.client.get_base_balance(base_currency)
+                if available_base >= amount:
+                    print(f"💰 Доступно {base_currency}: {available_base:.2f}, нужно: {amount:.2f}")
+                    return True
+                else:
+                    print(f"❌ Недостаточно {base_currency}: доступно {available_base:.2f}, нужно {amount:.2f}")
+                    return False
         except Exception as e:
             print(f"Ошибка проверки баланса: {e}")
             return False
@@ -344,11 +380,8 @@ class GridManager:
             
             for level in grid:
                 if level["status"] == "pending":
-                    # Рассчитываем требуемую сумму для ордера
-                    required_amount = level["amount"] * level["price"]
-                    
-                    # Проверяем, достаточно ли средств
-                    if self.check_available_balance(required_amount):
+                    # Проверяем, достаточно ли средств для ордера
+                    if self.check_available_balance(symbol, level["side"], level["amount"], level["price"]):
                         order = self.client.place_order(
                             symbol=symbol,
                             side=level["side"],
