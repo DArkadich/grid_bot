@@ -8,10 +8,10 @@ services:
       - BYBIT_API_KEY=${BYBIT_API_KEY}
       - BYBIT_API_SECRET=${BYBIT_API_SECRET}
       - BYBIT_ACCOUNT_TYPE=${BYBIT_ACCOUNT_TYPE}
-      - SYMBOLS=${SYMBOLS}
-      - GRID_LEVELS=${GRID_LEVELS}
-      - GRID_SPREAD=${GRID_SPREAD}
-      - LEVEL_AMOUNT=${LEVEL_AMOUNT}
+      - SYMBOLS=DOGE/USDT
+      - GRID_LEVELS=10
+      - GRID_SPREAD=0.001
+      - LEVEL_AMOUNT=0.5
     volumes:
       - ./shared:/app/shared
     restart: unless-stopped
