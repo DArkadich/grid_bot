@@ -32,19 +32,31 @@ from dataclasses import dataclass
 from telegram import Bot
 
 # ========== КОНФИГУРАЦИЯ ==========
+# Настройки уровней риска
+RISK_LEVELS = {
+    1: {"deposit_percent": 60, "grid_levels": 8, "spread": 0.002, "name": "Консервативный"},
+    2: {"deposit_percent": 70, "grid_levels": 10, "spread": 0.0015, "name": "Умеренный"},
+    3: {"deposit_percent": 80, "grid_levels": 12, "spread": 0.001, "name": "Активный"},
+    4: {"deposit_percent": 90, "grid_levels": 15, "spread": 0.0008, "name": "Агрессивный"},
+    5: {"deposit_percent": 95, "grid_levels": 20, "spread": 0.0005, "name": "Экстремальный"}
+}
+
 @dataclass
 class GridConfig:
     # API
     api_key: str = os.environ.get("BYBIT_API_KEY")
     api_secret: str = os.environ.get("BYBIT_API_SECRET")
     
-    # Параметры сетки
-    grid_levels: int = int(os.environ.get("GRID_LEVELS"))  # количество уровней
-    grid_spread: float = float(os.environ.get("GRID_SPREAD"))  # % между уровнями
-    level_amount: float = float(os.environ.get("LEVEL_AMOUNT"))  # USDT на уровень
+    # Универсальная система управления рисками
+    risk_level: int = int(os.environ.get("RISK_LEVEL", "3"))  # 1-5 уровень агрессивности
+    
+    # Параметры сетки (будут рассчитаны автоматически)
+    grid_levels: int = None
+    grid_spread: float = None
+    level_amount: float = None
     
     # Логарифмическая сетка
-    log_multiplier: float = float(os.environ.get("LOG_MULTIPLIER", "1.5"))  # множитель для логарифмического распределения
+    log_multiplier: float = float(os.environ.get("LOG_MULTIPLIER", "1.5"))
     
     # Пары для торговли
     symbols: List[str] = None
@@ -56,20 +68,49 @@ class GridConfig:
         if not self.api_secret:
             raise ValueError("BYBIT_API_SECRET не указан в переменных окружения")
         
-        # Проверяем параметры сетки
-        if not os.environ.get("GRID_LEVELS"):
-            raise ValueError("GRID_LEVELS не указан в переменных окружения")
-        if not os.environ.get("GRID_SPREAD"):
-            raise ValueError("GRID_SPREAD не указан в переменных окружения")
-        if not os.environ.get("LEVEL_AMOUNT"):
-            raise ValueError("LEVEL_AMOUNT не указан в переменных окружения")
+        # Символы из переменной окружения
+        env_symbols = os.environ.get("SYMBOLS")
+        if not env_symbols:
+            raise ValueError("SYMBOLS не указан в переменных окружения")
         
-        if not self.symbols:
-            # Читаем символы из переменной окружения
-            env_symbols = os.environ.get("SYMBOLS")
-            if not env_symbols:
-                raise ValueError("SYMBOLS не указан в переменных окружения")
-            self.symbols = [s.strip() for s in env_symbols.split(",")]
+        self.symbols = [s.strip() for s in env_symbols.split(",")]
+        
+        # Проверяем уровень риска
+        if self.risk_level not in RISK_LEVELS:
+            raise ValueError(f"RISK_LEVEL должен быть от 1 до 5, получен: {self.risk_level}")
+    
+    def calculate_risk_parameters(self, total_deposit: float):
+        """Рассчитать параметры торговли на основе уровня риска и депозита"""
+        if self.risk_level not in RISK_LEVELS:
+            raise ValueError(f"Неверный уровень риска: {self.risk_level}")
+        
+        risk_config = RISK_LEVELS[self.risk_level]
+        pairs_count = len(self.symbols)
+        
+        # Расчёт параметров
+        trading_deposit = total_deposit * risk_config["deposit_percent"] / 100
+        deposit_per_pair = trading_deposit / pairs_count
+        
+        self.grid_levels = risk_config["grid_levels"]
+        self.grid_spread = risk_config["spread"]
+        self.level_amount = deposit_per_pair / self.grid_levels
+        
+        print(f"🎚️ Уровень риска: {self.risk_level} ({risk_config['name']})")
+        print(f"💰 Общий депозит: {total_deposit:.2f} USDT")
+        print(f"📊 Торговый депозит: {trading_deposit:.2f} USDT ({risk_config['deposit_percent']}%)")
+        print(f"🔢 Количество пар: {pairs_count}")
+        print(f"💱 На пару: {deposit_per_pair:.2f} USDT")
+        print(f"📈 Уровней в сетке: {self.grid_levels}")
+        print(f"📏 Спред: {self.grid_spread * 100:.3f}%")
+        print(f"💵 Размер ордера: {self.level_amount:.2f} USDT")
+        
+        return {
+            "trading_deposit": trading_deposit,
+            "deposit_per_pair": deposit_per_pair,
+            "grid_levels": self.grid_levels,
+            "grid_spread": self.grid_spread,
+            "level_amount": self.level_amount
+        }
 
 # ========== КЛИЕНТ БИРЖИ ==========
 class BybitClient:
@@ -553,6 +594,11 @@ def main():
     # Инициализация
     config = GridConfig()
     client = BybitClient(config)
+    
+    # Получаем общий депозит и рассчитываем параметры риска
+    total_deposit = client.get_balance()
+    config.calculate_risk_parameters(total_deposit)
+    
     grid_manager = GridManager(client, config)
     
     # Попытка загрузить существующие сетки
