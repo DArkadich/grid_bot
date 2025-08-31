@@ -587,8 +587,14 @@ def main():
     # БЕСКОНЕЧНЫЙ ЦИКЛ МОНИТОРИНГА
     while True:
         try:
-            # Мониторинг активных сеток (приоритет DOGE/USDT)
-            symbols_priority = ['DOGE/USDT'] + [s for s in grid_manager.grids.keys() if s != 'DOGE/USDT']
+            # Мониторинг активных сеток (приоритет по порядку в .env)
+            symbols_priority = [s for s in config.symbols if s in grid_manager.grids.keys()]
+            
+            # Показываем порядок приоритета (только при первом запуске цикла)
+            if int(time.time()) % 3600 < 10:  # Раз в час показываем приоритет
+                priority_str = " → ".join(symbols_priority)
+                print(f"🎯 Приоритет обработки пар: {priority_str}")
+            
             for symbol in symbols_priority:
                 # Проверяем статус ордеров
                 ticker = client.get_ticker(symbol)
