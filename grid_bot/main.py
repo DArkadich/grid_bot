@@ -569,8 +569,9 @@ def main():
     # БЕСКОНЕЧНЫЙ ЦИКЛ МОНИТОРИНГА
     while True:
         try:
-            # Мониторинг активных сеток
-            for symbol in grid_manager.grids.keys():
+            # Мониторинг активных сеток (приоритет DOGE/USDT)
+            symbols_priority = ['DOGE/USDT'] + [s for s in grid_manager.grids.keys() if s != 'DOGE/USDT']
+            for symbol in symbols_priority:
                 # Проверяем статус ордеров
                 ticker = client.get_ticker(symbol)
                 if ticker and "last" in ticker:
@@ -580,9 +581,8 @@ def main():
                     # Синхронизируем статус ордеров с биржей
                     grid_manager.sync_orders_with_exchange(symbol)
                     
-                    # Каждые 5 минут проверяем и пересоздаём недостающие ордера
-                    if int(time.time()) % 300 < 60:  # Каждые 5 минут
-                        grid_manager.check_and_recreate_orders(symbol)
+                    # Постоянно проверяем и пересоздаём недостающие ордера
+                    grid_manager.check_and_recreate_orders(symbol)
             
             # Пауза между проверками (1 минута)
             time.sleep(60)
