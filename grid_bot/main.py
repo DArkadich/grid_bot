@@ -369,7 +369,7 @@ class GridManager:
             print(f"Ошибка сохранения сетки в БД: {e}")
     
     def place_grid_orders(self, symbol: str):
-        """Разместить ордера сетки с проверкой баланса"""
+        """Разместить ордера сетки с проверкой баланса, приоритет ближним к цене"""
         try:
             if symbol not in self.grids:
                 return
@@ -378,29 +378,47 @@ class GridManager:
             placed_orders = 0
             skipped_orders = 0
             
-            for level in grid:
-                if level["status"] == "pending":
-                    # Проверяем, достаточно ли средств для ордера
-                    if self.check_available_balance(symbol, level["side"], level["amount"], level["price"]):
-                        order = self.client.place_order(
-                            symbol=symbol,
-                            side=level["side"],
-                            amount=level["amount"],
-                            price=level["price"]
-                        )
-                        
-                        if order and "id" in order:
-                            level["order_id"] = order["id"]
-                            level["status"] = "active"
-                            placed_orders += 1
-                            print(f"✅ Ордер размещён: {symbol} {level['side']} {level['amount']:.2f} @ {level['price']}")
-                        
-                        time.sleep(0.1)  # Задержка между ордерами
-                    else:
-                        skipped_orders += 1
-                        print(f"⏭️ Ордер пропущен: {symbol} {level['side']} {level['amount']:.2f} @ {level['price']} (недостаточно средств)")
+            # Получаем текущую цену для приоритизации
+            ticker = self.client.get_ticker(symbol)
+            current_price = ticker["last"] if ticker and "last" in ticker else None
+            
+            # Фильтруем pending ордера и сортируем по близости к текущей цене
+            pending_orders = [level for level in grid if level["status"] == "pending"]
+            
+            if current_price and pending_orders:
+                # Сортируем по расстоянию от текущей цены (ближние первыми)
+                pending_orders.sort(key=lambda x: abs(x["price"] - current_price))
+                print(f"📊 Приоритизация ордеров по близости к цене {current_price:.6f}")
+            
+            for level in pending_orders:
+                # Проверяем, достаточно ли средств для ордера
+                if self.check_available_balance(symbol, level["side"], level["amount"], level["price"]):
+                    order = self.client.place_order(
+                        symbol=symbol,
+                        side=level["side"],
+                        amount=level["amount"],
+                        price=level["price"]
+                    )
+                    
+                    if order and "id" in order:
+                        level["order_id"] = order["id"]
+                        level["status"] = "active"
+                        placed_orders += 1
+                        distance = abs(level["price"] - current_price) / current_price * 100 if current_price else 0
+                        print(f"✅ Ордер размещён: {symbol} {level['side']} {level['amount']:.2f} @ {level['price']:.6f} (±{distance:.2f}%)")
+                    
+                    time.sleep(0.1)  # Задержка между ордерами
+                else:
+                    skipped_orders += 1
+                    distance = abs(level["price"] - current_price) / current_price * 100 if current_price else 0
+                    print(f"⏭️ Ордер пропущен: {symbol} {level['side']} {level['amount']:.2f} @ {level['price']:.6f} (±{distance:.2f}%) - недостаточно средств")
             
             print(f"📊 {symbol}: размещено {placed_orders} ордеров, пропущено {skipped_orders}")
+            if skipped_orders > 0:
+                print(f"💡 Пропущенные ордера будут размещены при освобождении средств (приоритет ближним)")
+            
+            # Сохраняем изменения в базу данных  
+            self.save_grid_to_db(symbol)
                     
         except Exception as e:
             print(f"Ошибка размещения ордеров сетки {symbol}: {e}")
