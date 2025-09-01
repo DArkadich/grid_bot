@@ -38,7 +38,22 @@ RISK_LEVELS = {
     2: {"deposit_percent": 70, "grid_levels": 10, "spread": 0.0015, "name": "Умеренный"},
     3: {"deposit_percent": 80, "grid_levels": 12, "spread": 0.001, "name": "Активный"},
     4: {"deposit_percent": 90, "grid_levels": 15, "spread": 0.0008, "name": "Агрессивный"},
-    5: {"deposit_percent": 95, "grid_levels": 20, "spread": 0.0005, "name": "Экстремальный"}
+    5: {"deposit_percent": 95, "grid_levels": 20, "spread": 0.0005, "name": "Экстремальный"},
+    6: {"deposit_percent": 98, "grid_levels": 25, "spread": 0.0004, "name": "Сверх-агрессивный"},
+    7: {"deposit_percent": 99, "grid_levels": 30, "spread": 0.0003, "name": "Максимальный"},
+    8: {"deposit_percent": 99.5, "grid_levels": 35, "spread": 0.00025, "name": "Ультра-максимальный"},
+    9: {"deposit_percent": 99.8, "grid_levels": 40, "spread": 0.0002, "name": "Экстремальный+"},
+    10: {"deposit_percent": 99.9, "grid_levels": 45, "spread": 0.00015, "name": "Максимум+"},
+    11: {"deposit_percent": 99.95, "grid_levels": 50, "spread": 0.00012, "name": "Ультра-максимум"},
+    12: {"deposit_percent": 99.98, "grid_levels": 55, "spread": 0.0001, "name": "Экстремальный++"},
+    13: {"deposit_percent": 99.99, "grid_levels": 60, "spread": 0.00008, "name": "Максимум++"},
+    14: {"deposit_percent": 99.995, "grid_levels": 65, "spread": 0.00006, "name": "Ультра-максимум+"},
+    15: {"deposit_percent": 99.998, "grid_levels": 70, "spread": 0.00005, "name": "Экстремальный+++"},
+    16: {"deposit_percent": 99.999, "grid_levels": 75, "spread": 0.00004, "name": "Максимум+++"},
+    17: {"deposit_percent": 99.9995, "grid_levels": 80, "spread": 0.00003, "name": "Ультра-максимум++"},
+    18: {"deposit_percent": 99.9998, "grid_levels": 85, "spread": 0.000025, "name": "Экстремальный++++"},
+    19: {"deposit_percent": 99.9999, "grid_levels": 90, "spread": 0.00002, "name": "Максимум++++"},
+    20: {"deposit_percent": 99.99995, "grid_levels": 95, "spread": 0.000015, "name": "Ультра-максимум+++"}
 }
 
 @dataclass
@@ -77,7 +92,7 @@ class GridConfig:
         
         # Проверяем уровень риска
         if self.risk_level not in RISK_LEVELS:
-            raise ValueError(f"RISK_LEVEL должен быть от 1 до 5, получен: {self.risk_level}")
+            raise ValueError(f"RISK_LEVEL должен быть от 1 до 20, получен: {self.risk_level}")
     
     def calculate_risk_parameters(self, total_deposit: float):
         """Рассчитать параметры торговли на основе уровня риска и депозита"""
@@ -365,7 +380,7 @@ class GridManager:
                     "amount": base_amount,
                     "status": "pending"
                 })
-                
+            
                 print(f"   📉 Buy уровень {i}: {buy_price} (-{distance * 100:.2f}%)")
             
             # Создаём уровни продажи выше текущей цены (логарифмически)
@@ -613,19 +628,19 @@ def main():
             grid_manager.check_and_recreate_orders(symbol)
     else:
         print("📝 Существующие сетки не найдены. Создаём новые...")
-        # Создание сеток для всех пар
-        for symbol in config.symbols:
-            try:
-                ticker = client.get_ticker(symbol)
-                if ticker and "last" in ticker:
-                    current_price = ticker["last"]
-                    grid_manager.create_grid(symbol, current_price)
-                    grid_manager.place_grid_orders(symbol)
-                    print(f"Сетка активирована для {symbol}")
-                else:
-                    print(f"Не удалось получить цену для {symbol}")
-            except Exception as e:
-                print(f"Ошибка инициализации {symbol}: {e}")
+    # Создание сеток для всех пар
+    for symbol in config.symbols:
+        try:
+            ticker = client.get_ticker(symbol)
+            if ticker and "last" in ticker:
+                current_price = ticker["last"]
+                grid_manager.create_grid(symbol, current_price)
+                grid_manager.place_grid_orders(symbol)
+                print(f"Сетка активирована для {symbol}")
+            else:
+                print(f"Не удалось получить цену для {symbol}")
+        except Exception as e:
+            print(f"Ошибка инициализации {symbol}: {e}")
     
     print("✅ Все сетки готовы к работе!")
     print("📊 Мониторинг активен...")
