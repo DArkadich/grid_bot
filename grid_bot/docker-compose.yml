@@ -9,9 +9,8 @@ services:
       - BYBIT_API_SECRET=${BYBIT_API_SECRET}
       - BYBIT_ACCOUNT_TYPE=${BYBIT_ACCOUNT_TYPE}
       - SYMBOLS=${SYMBOLS}
-      - GRID_LEVELS=${GRID_LEVELS}
-      - GRID_SPREAD=${GRID_SPREAD}
-      - LEVEL_AMOUNT=${LEVEL_AMOUNT}
+      - RISK_LEVEL=${RISK_LEVEL}
+      - LOG_MULTIPLIER=${LOG_MULTIPLIER}
     volumes:
       - ./shared:/app/shared
     restart: unless-stopped
