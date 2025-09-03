@@ -134,7 +134,7 @@ class BybitClient:
             "apiKey": config.api_key,
             "secret": config.api_secret,
             "enableRateLimit": True,
-            "options": {"defaultType": "unified"}
+            "options": {"defaultType": "spot"}
         })
         self.exchange.load_markets()
     
@@ -226,7 +226,8 @@ class BybitClient:
                 type="limit",
                 side=side,
                 amount=amount,
-                price=price
+                price=price,
+                params={"category": "spot"}
             )
             return order
         except Exception as e:
