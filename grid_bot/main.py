@@ -553,6 +553,11 @@ class GridManager:
                                 
                                 if new_status == "filled":
                                     print(f"✅ Ордер исполнен: {symbol} {level['side']} {level['amount']} @ {level['price']}")
+                                    # Сразу создаём зеркальный ордер противоположной стороны на том же уровне
+                                    try:
+                                        self.create_mirror_order(symbol, level, filled_price=float(order.get('price') or level['price']))
+                                    except Exception as mirror_err:
+                                        print(f"⚠️ Не удалось создать зеркальный ордер: {mirror_err}")
                                 elif new_status == "canceled":
                                     print(f"❌ Ордер отменён: {symbol} {level['side']} {level['amount']} @ {level['price']}")
                     
@@ -581,6 +586,48 @@ class GridManager:
             
         except Exception as e:
             print(f"Ошибка обновления статуса в БД: {e}")
+
+    def create_mirror_order(self, symbol: str, filled_level: Dict, filled_price: float):
+        """Создать зеркальный ордер противоположной стороны на том же уровне после исполнения"""
+        side = "sell" if filled_level["side"] == "buy" else "buy"
+        level_index = filled_level["level"]
+        
+        # Рассчитываем цену зеркального ордера по текущей формуле сетки
+        distance = self.config.grid_spread * (self.config.log_multiplier ** level_index)
+        if side == "sell":
+            price = filled_price * (1 + distance)
+        else:
+            price = filled_price * (1 - distance)
+        price = round(price, 6)
+
+        amount = filled_level["amount"]
+
+        # Проверяем баланс перед размещением
+        if not self.check_available_balance(symbol, side, amount, price):
+            print(f"⏭️ Зеркальный ордер пропущен: {symbol} {side} {amount:.2f} @ {price} — недостаточно средств")
+            return
+
+        order = self.client.place_order(symbol=symbol, side=side, amount=amount, price=price)
+        if order and "id" in order:
+            # Обновляем в памяти и БД
+            new_level = {
+                "level": level_index,
+                "side": side,
+                "amount": amount,
+                "price": price,
+                "order_id": order["id"],
+                "status": "active",
+            }
+            # Заменяем существующую запись уровня той же стороны
+            for i, lvl in enumerate(self.grids[symbol]):
+                if lvl["level"] == level_index and lvl["side"] == side:
+                    self.grids[symbol][i] = new_level
+                    break
+            else:
+                self.grids[symbol].append(new_level)
+
+            self.update_order_in_db(symbol, level_index, side, price, order["id"], "active")
+            print(f"🔁 Создан зеркальный ордер: {symbol} {side} {amount:.2f} @ {price}")
     
     def check_and_recreate_orders(self, symbol: str):
         """Проверить и пересоздать недостающие ордера с учётом баланса"""
