@@ -284,31 +284,83 @@ class GridManager:
             print(f"Ошибка инициализации БД: {e}")
     
     def check_available_balance(self, symbol: str, side: str, amount: float, price: float) -> bool:
-        """Проверить, достаточно ли средств для создания ордера"""
+        """Проверить, достаточно ли средств для создания ордера с учётом заблокированных в ордерах"""
         try:
             if side == "buy":
                 # Для покупки нужен USDT
                 required_usdt = amount * price
+                
+                # Получаем свободный USDT
                 available_usdt = self.client.get_balance()
-                if available_usdt >= required_usdt:
-                    print(f"💰 Доступно USDT: {available_usdt:.2f}, нужно: {required_usdt:.2f}")
+                
+                # Получаем заблокированный USDT в buy ордерах
+                locked_usdt = self.get_locked_usdt_in_orders()
+                
+                # Доступный USDT = свободный - заблокированный
+                actual_available_usdt = available_usdt - locked_usdt
+                
+                if actual_available_usdt >= required_usdt:
+                    print(f"💰 Доступно USDT: {actual_available_usdt:.2f} (свободный: {available_usdt:.2f}, заблокирован: {locked_usdt:.2f}), нужно: {required_usdt:.2f}")
                     return True
                 else:
-                    print(f"❌ Недостаточно USDT: доступно {available_usdt:.2f}, нужно {required_usdt:.2f}")
+                    print(f"❌ Недостаточно USDT: доступно {actual_available_usdt:.2f} (свободный: {available_usdt:.2f}, заблокирован: {locked_usdt:.2f}), нужно {required_usdt:.2f}")
                     return False
             else:  # sell
-                # Для продажи нужна базовая валюта (DOGE)
+                # Для продажи нужна базовая валюта (DOGE, APT, etc.)
                 base_currency = symbol.split('/')[0]  # DOGE из DOGE/USDT
+                
+                # Получаем свободную базовую валюту
                 available_base = self.client.get_base_balance(base_currency)
-                if available_base >= amount:
-                    print(f"💰 Доступно {base_currency}: {available_base:.2f}, нужно: {amount:.2f}")
+                
+                # Получаем заблокированную базовую валюту в sell ордерах
+                locked_base = self.get_locked_base_in_orders(symbol, base_currency)
+                
+                # Доступная базовая валюта = свободная - заблокированная
+                actual_available_base = available_base - locked_base
+                
+                if actual_available_base >= amount:
+                    print(f"💰 Доступно {base_currency}: {actual_available_base:.2f} (свободный: {available_base:.2f}, заблокирован: {locked_base:.2f}), нужно: {amount:.2f}")
                     return True
                 else:
-                    print(f"❌ Недостаточно {base_currency}: доступно {available_base:.2f}, нужно {amount:.2f}")
+                    print(f"❌ Недостаточно {base_currency}: доступно {actual_available_base:.2f} (свободный: {available_base:.2f}, заблокирован: {locked_base:.2f}), нужно {amount:.2f}")
                     return False
         except Exception as e:
             print(f"Ошибка проверки баланса: {e}")
             return False
+    
+    def get_locked_usdt_in_orders(self) -> float:
+        """Получить количество USDT заблокированных в buy ордерах"""
+        try:
+            # Получаем все открытые buy ордера
+            open_orders = self.client.exchange.fetch_open_orders()
+            locked_usdt = 0.0
+            
+            for order in open_orders:
+                if order['side'] == 'buy':
+                    # Заблокированный USDT = количество * цена
+                    locked_usdt += float(order['amount']) * float(order['price'])
+            
+            return locked_usdt
+        except Exception as e:
+            print(f"Ошибка получения заблокированного USDT: {e}")
+            return 0.0
+    
+    def get_locked_base_in_orders(self, symbol: str, base_currency: str) -> float:
+        """Получить количество базовой валюты заблокированной в sell ордерах для конкретной пары"""
+        try:
+            # Получаем все открытые sell ордера для конкретной пары
+            open_orders = self.client.exchange.fetch_open_orders(symbol)
+            locked_base = 0.0
+            
+            for order in open_orders:
+                if order['side'] == 'sell':
+                    # Заблокированная базовая валюта = количество
+                    locked_base += float(order['amount'])
+            
+            return locked_base
+        except Exception as e:
+            print(f"Ошибка получения заблокированной {base_currency}: {e}")
+            return 0.0
     
     def load_existing_grids(self):
         """Загрузить существующие сетки из базы данных"""
