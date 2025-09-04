@@ -264,10 +264,25 @@ class GridManager:
                 )
             """)
 
-            # Гарантируем уникальность уровня: одна запись на (symbol, level, side)
+            # Сначала чистим дубликаты, затем пытаемся создать уникальный индекс
             cursor.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_grids_unique
-                ON grids(symbol, level, side)
+                DELETE FROM grids
+                WHERE id NOT IN (
+                    SELECT MAX(id) FROM grids GROUP BY symbol, level, side
+                )
+            """)
+            try:
+                cursor.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_grids_unique
+                    ON grids(symbol, level, side)
+                """)
+            except Exception as _:
+                # Если вдруг есть конфликт, ещё раз подчистим и продолжим
+                cursor.execute("""
+                    DELETE FROM grids
+                    WHERE id NOT IN (
+                        SELECT MAX(id) FROM grids GROUP BY symbol, level, side
+                )
             """)
             
             # Таблица сделок
@@ -544,8 +559,7 @@ class GridManager:
             if skipped_orders > 0:
                 print(f"💡 Пропущенные ордера будут размещены при освобождении средств (приоритет ближним)")
             
-            # Сохраняем изменения в базу данных  
-            self.save_grid_to_db(symbol)
+            # Не пересохраняем сетку целиком, т.к. уровни уже в БД и обновляются точечно
                     
         except Exception as e:
             print(f"Ошибка размещения ордеров сетки {symbol}: {e}")
