@@ -263,6 +263,12 @@ class GridManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Гарантируем уникальность уровня: одна запись на (symbol, level, side)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_grids_unique
+                ON grids(symbol, level, side)
+            """)
             
             # Таблица сделок
             cursor.execute("""
@@ -367,6 +373,15 @@ class GridManager:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+
+            # Удаляем дубликаты, оставляя только самую свежую запись на (symbol, level, side)
+            cursor.execute("""
+                DELETE FROM grids
+                WHERE id NOT IN (
+                    SELECT MAX(id) FROM grids GROUP BY symbol, level, side
+                )
+            """)
+            conn.commit()
             
             # Получаем все символы с существующими сетками
             cursor.execute("SELECT DISTINCT symbol FROM grids")
@@ -467,9 +482,12 @@ class GridManager:
             cursor = conn.cursor()
             
             for level in grid:
+                # Обновляем запись для уровня, не создавая дубликаты
                 cursor.execute("""
-                    INSERT INTO grids (symbol, level, side, amount, price)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO grids (symbol, level, side, amount, price, order_id, status)
+                    VALUES (?, ?, ?, ?, ?, NULL, 'pending')
+                    ON CONFLICT(symbol, level, side)
+                    DO UPDATE SET amount=excluded.amount, price=excluded.price, status='pending', order_id=NULL
                 """, (symbol, level["level"], level["side"], level["amount"], level["price"]))
             
             conn.commit()
